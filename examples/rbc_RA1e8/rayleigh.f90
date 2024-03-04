@@ -14,7 +14,7 @@ module user
   type(rbc_t) :: runtime_rbc
      
   !> Mesh deformation
-  real(kind=rp) :: delta_mesh = 0.0_rp !How much to deform to the top and bottom plate. =0 means no deformation
+  real(kind=rp) :: delta_mesh = 1.5_rp !How much to deform to the top and bottom plate. =0 means no deformation
 
 contains
   ! Register user defined functions (see user_intf.f90)
@@ -61,18 +61,55 @@ contains
     real(kind=rp), intent(inout) :: z(lx, lx, lx, msh%nelv)
     type(tuple_i4_t) :: el_and_facet
     real(kind=rp) :: th
-    integer :: e, i, j ,k, l,  facet, nxyze
+    integer :: e, i, j ,k, l,  facet, nxyze, nxyz
     real(kind=rp) :: Betaz, x_pt, y_pt, z_pt, z_pt_def
     
+    ! The quadrature points
+    real(kind=rp), allocatable :: zg(:), zg_map(:) !< Quadrature points
+    real(kind=rp), allocatable :: wz(:)   !< Quadrature weights
+    real(kind=rp) :: max_z, min_z 
+     
+    ! Allocate the quadrature points 
+    allocate(zg(lz))
+    allocate(zg_map(lz))
+    allocate(wz(lz))
+    
+    ! Compute the quadrature weights and points 
+    call zwgll(zg, wz, lz)
+ 
     nxyze = lx*ly*lz*msh%nelv
+    nxyz = lx*ly*lz
+    
     if (delta_mesh .gt. 1e-8_rp) then
+       ! Perform the deformation in the z direction
        Betaz = delta_mesh 
        do i = 1, nxyze
           z_pt = z(i,1,1,1)
-          z_pt_def = 0.5*(tanh(Betaz*(2*z_pt-1.0))/tanh(Betaz) + 1.0)
+          z_pt_def = 0.5_rp*(tanh(Betaz*(2_rp*z_pt-1.0_rp))/tanh(Betaz) + 1.0_rp)
           z(i,1,1,1) = z_pt_def
        end do
+
+       !Fix the geometry in the z direction
+       do e = 1 , msh%nelv
+          ! Get the correct gll spacing in the element
+          max_z = vlmax(z(1,1,1,e),nxyz)
+          min_z = vlmin(z(1,1,1,e),nxyz)
+
+          do k = 1, lz
+             zg_map(k)=((1-zg(k))/2*min_z+(1+zg(k))/2*max_z)
+          end do
+      
+          ! Update the information of the element
+          do i = 1, lx
+             do j = 1, ly
+                do k = 1, lz
+                   z(i,j,k,e) = zg_map(k)
+                end do
+             end do
+          end do
+       end do
     end if
+
   end subroutine redistribute_elements
   
   subroutine set_scalar_boundary_conditions(s, x, y, z, nx, ny, nz, ix, iy, iz, ie, t, tstep)
