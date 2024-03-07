@@ -21,7 +21,7 @@ module rbc
      type(field_t) :: tt ! T ^2
      type(field_t) :: uxt ! u_z * T
      type(field_t) :: uyt ! u_z * T
-     type(field_t) :: uzt ! u_z * T
+     type(field_t) :: uzt ! u_z * T -> In budgets
      type(field_t) :: dtdx ! Derivative of scalar wrt x
      type(field_t) :: dtdy ! Detivative of scalar wrt y
      type(field_t) :: dtdz ! Derivative of scalar wrt z
@@ -36,8 +36,11 @@ module rbc
      type(field_t) :: dwdx ! Derivative wrt x
      type(field_t) :: dwdy ! Detivative wrt y
      type(field_t) :: dwdz ! Derivative wrt z
-     type(field_t) :: eps_k ! kinetic dissipation
+     type(field_t) :: eps_k ! kinetic dissipation -> In budgets
      type(field_t) :: eps_t ! thermal dissipation
+     type(field_t) :: e_k ! ! kinetic energy -> In budgets
+     type(field_t) :: uze_k ! -> In budgets
+     type(field_t) :: uzp ! ! -> In budgets
      
      !> Mean fields     
      type(mean_field_t) :: mean_t     ! Derivative wrt z
@@ -54,6 +57,9 @@ module rbc
      type(mean_field_t) :: mean_speri_u  ! Derivative wrt z
      type(mean_field_t) :: mean_speri_v  ! Derivative wrt z
      type(mean_field_t) :: mean_speri_w  ! Derivative wrt z
+     type(mean_field_t) :: mean_e_k ! ! kinetic energy -> In budgets
+     type(mean_field_t) :: mean_uze_k ! -> In budgets
+     type(mean_field_t) :: mean_uzp ! ! -> In budgets
      real(kind = rp):: t_last_sample = 0_rp
  
      !> Support fields for boundary/facet 
@@ -217,7 +223,11 @@ contains
 
 
     call this%eps_k%init( u%dof, 'eps_k')
-    call this%eps_t%init( u%dof, 'eps_t')
+    call this%eps_t%init( u%dof, 'eps_t') 
+    call this%e_k%init( u%dof, 'e_k')
+    call this%uze_k%init( u%dof, 'uze_k')
+    call this%uzp%init( u%dof, 'uzp')
+
 
     call this%div_dtdX%init( u%dof, 'div_dtdX')
     call this%mass_area_top%init( u%dof, 'mat')
@@ -244,6 +254,9 @@ contains
     call this%mean_speri_u%init( this%spectral_error_indicator%u_hat, 'mean_speri_u')
     call this%mean_speri_v%init( this%spectral_error_indicator%v_hat, 'mean_speri_v')
     call this%mean_speri_w%init( this%spectral_error_indicator%w_hat, 'mean_speri_w')
+    call this%mean_e_k%init( this%e_k, 'mean_e_k')
+    call this%mean_uze_k%init( this%uze_k, 'mean_uze_k')
+    call this%mean_uzp%init( this%uzp, 'mean_uzp')
     
     !> Initialize the controllers
     call json_get(params, 'case.end_time', T_end)
@@ -366,7 +379,7 @@ contains
     this%eps_l%fields(1)%f => this%eps_t
     this%eps_l%fields(2)%f => this%eps_k
 
-    allocate(this%mean_fields_l%fields(14))
+    allocate(this%mean_fields_l%fields(17))
     this%mean_fields_l%fields(1)%f => this%mean_t%mf
     this%mean_fields_l%fields(2)%f => this%mean_tt%mf
     this%mean_fields_l%fields(3)%f => this%mean_uxt%mf
@@ -381,6 +394,9 @@ contains
     this%mean_fields_l%fields(12)%f => this%mean_speri_u%mf
     this%mean_fields_l%fields(13)%f => this%mean_speri_v%mf
     this%mean_fields_l%fields(14)%f => this%mean_speri_w%mf
+    this%mean_fields_l%fields(15)%f => this%mean_e_k%mf
+    this%mean_fields_l%fields(16)%f => this%mean_uze_k%mf
+    this%mean_fields_l%fields(17)%f => this%mean_uzp%mf
 
 
     !> Initialize list to identify relevant facets in boundaries
@@ -516,6 +532,9 @@ contains
 
     call this%eps_k%free()
     call this%eps_t%free()
+    call this%e_k%free()
+    call this%uze_k%free()
+    call this%uzp%free()
     
     !> Mean fields
     call this%mean_t%free()
@@ -532,6 +551,9 @@ contains
     call this%mean_speri_u%free()
     call this%mean_speri_v%free()
     call this%mean_speri_w%free()
+    call this%mean_e_k%free()
+    call this%mean_uze_k%free()
+    call this%mean_uzp%free()
     
     call this%mass_area_top%free()
     call this%mass_area_bot%free()
@@ -605,11 +627,14 @@ contains
     call this%mean_speri_u%reset() 
     call this%mean_speri_v%reset() 
     call this%mean_speri_w%reset()
+    call this%mean_e_k%reset()   
+    call this%mean_uze_k%reset()   
+    call this%mean_uzp%reset()   
     this%data_in_stats = .false. 
 
   end subroutine rbc_write_stats
 
- 
+
   subroutine rbc_calculate(this, t, tstep, coef, params, Ra, Pr, get_spec_err_ind)
     class(rbc_t), intent(inout), target :: this
     real(kind=rp), intent(in) :: t
@@ -719,6 +744,10 @@ contains
     call divergence_of_field(this%div_dtdX, &
                              this%dtdx, this%dtdy, this%dtdz, &
                              this%work_field, coef)
+    
+    !> Budgets of energy equation
+    call calculate_budget_terms(this%e_k, this%uze_k, this%uzp, &
+                                u, v, w, p, s)
    
     this%end_time = MPI_WTIME()
     if (pe_rank == 0) write(*,*) 'Elapsed time for calculate in GPU(s) = ', &
@@ -762,6 +791,9 @@ contains
     call this%mean_speri_w%update(t-this%t_last_sample)
     call this%mean_eps_k%update(t-this%t_last_sample)
     call this%mean_eps_t%update(t-this%t_last_sample)
+    call this%mean_e_k%update(t-this%t_last_sample)
+    call this%mean_uze_k%update(t-this%t_last_sample)
+    call this%mean_uzp%update(t-this%t_last_sample)
     this%t_last_sample = t !< Update the last time that we updated
 
   end subroutine rbc_update_stats
@@ -993,6 +1025,18 @@ contains
                           this%eps_t%x_d, &
                           n,DEVICE_TO_HOST,sync=.true.)
        
+       call device_memcpy(this%e_k%x, &
+                          this%e_k%x_d, &
+                          n,DEVICE_TO_HOST,sync=.true.)
+       
+       call device_memcpy(this%uze_k%x, &
+                          this%uze_k%x_d, &
+                          n,DEVICE_TO_HOST,sync=.true.)
+       
+       call device_memcpy(this%uzp%x, &
+                          this%uzp%x_d, &
+                          n,DEVICE_TO_HOST,sync=.true.)
+       
        !> Mean quantities
        
        call device_memcpy(this%mean_t%mf%x, &
@@ -1049,6 +1093,18 @@ contains
 
        call device_memcpy(this%mean_speri_w%mf%x, &
                           this%mean_speri_w%mf%x_d, &
+                          n,DEVICE_TO_HOST,sync=.true.)
+       
+       call device_memcpy(this%mean_e_k%mf%x, &
+                          this%mean_e_k%mf%x_d, &
+                          n,DEVICE_TO_HOST,sync=.true.)
+       
+       call device_memcpy(this%mean_uze_k%mf%x, &
+                          this%mean_uze_k%mf%x_d, &
+                          n,DEVICE_TO_HOST,sync=.true.)
+       
+       call device_memcpy(this%mean_uzp%mf%x, &
+                          this%mean_uzp%mf%x_d, &
                           n,DEVICE_TO_HOST,sync=.true.)
        
     end if
@@ -1336,6 +1392,56 @@ contains
     end if
 
   end subroutine calculate_kinetic_dissipation
+  
+  
+  subroutine calculate_budget_terms(e_k, uze_k, uzp,&
+                                    u, v, w, p, s)
+    type(field_t), intent(inout) :: e_k
+    type(field_t), intent(inout) :: uze_k
+    type(field_t), intent(inout) :: uzp
+    type(field_t), intent(inout) :: u
+    type(field_t), intent(inout) :: v
+    type(field_t), intent(inout) :: w
+    type(field_t), intent(inout) :: p
+    type(field_t), intent(inout) :: s
+     
+    real(kind=rp) :: c1 = 0.5_rp, c2 = 1_rp
+    integer :: n
+
+    n = e_k%dof%size()
+
+    !> Kinetic energy e_k=0.5*(u**2 + v**2 + w**2)
+    if (NEKO_BCKND_DEVICE .eq. 1) then 
+        call device_rzero(e_k%x_d,n)
+        
+        call device_addsqr2s2(e_k%x_d, u%x_d, c1, n)
+        call device_addsqr2s2(e_k%x_d, v%x_d, c1, n)
+        call device_addsqr2s2(e_k%x_d, w%x_d, c1, n)
+    else
+        call rzero(e_k%x,n)
+        
+        call addsqr2s2(e_k%x, u%x, c1, n)
+        call addsqr2s2(e_k%x, v%x, c1, n)
+        call addsqr2s2(e_k%x, w%x, c1, n)
+
+    end if
+
+    !> w*E
+    if (NEKO_BCKND_DEVICE .eq. 1) then 
+       call device_col3(uze_k%x_d, w%x_d, e_k%x_d, n)               
+    else
+       call col3(uze_k%x, w%x, e_k%x, n)                          
+    end if
+    
+    !> w*p
+    if (NEKO_BCKND_DEVICE .eq. 1) then 
+       call device_col3(uzp%x_d, w%x_d, p%x_d, n)               
+    else
+       call col3(uzp%x, w%x, p%x, n)                          
+    end if
+
+
+  end subroutine calculate_budget_terms
 
 
   function rms_in_space( u, work_field, work_field2, coef) result(urms)
