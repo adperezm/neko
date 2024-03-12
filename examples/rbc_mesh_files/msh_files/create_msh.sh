@@ -2,11 +2,11 @@
 
 cp placeholderrea cylinder.rea
 
-nekpath="/cfs/klemming/projects/supr/snic2021-5-555/adperez/software/rbc_mesh_tools/Nek5000/"
+nekpath="/scratch/adperez/update_neko/cpu_neko/neko/examples/rbc_mesh_files/rbc_mesh_tools/Nek5000/"
 tools=$nekpath"tools/"
 bin=$nekpath"bin/"
 
-nekopath="/cfs/klemming/projects/supr/snic2021-5-555/adperez/software/neko/"
+nekopath="/scratch/adperez/update_neko/cpu_neko/neko/"
 contrib=$nekopath"contrib/rea2nbin/"
 
 export PATH=$tools:$PATH
@@ -25,7 +25,7 @@ re2torea < re2torea_input
 # Extrude to 3d
 n2to3 < n2to3_input
 
-reatore2 < reatore2_input
+#reatore2 < reatore2_input
 
 # Convert to neko mesh
 rea2nbin cylinder_3d.re2 cylinder.nmsh
