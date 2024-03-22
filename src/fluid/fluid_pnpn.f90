@@ -51,6 +51,7 @@ module fluid_pnpn
   use json_utils, only : json_get
   use json_module, only : json_file
   use material_properties, only : material_properties_t
+  use data_streamer, only : data_streamer_t 
   implicit none
   private
 
@@ -101,6 +102,12 @@ module fluid_pnpn
 
      !> Adjust flow volume
      type(fluid_volflow_t) :: vol_flow
+
+     !> data streamer
+     type(data_streamer_t) :: dstream
+     logical :: stream_init = .false. 
+     logical :: stream_fields = .false. 
+
 
    contains
      procedure, pass(this) :: init => fluid_pnpn_init
@@ -268,6 +275,25 @@ contains
 
     if (params%valid_path('case.fluid.flow_rate_force')) then
        call this%vol_flow%init(this%dm_Xh, params)
+    end if
+
+    !> Initialize the streamer
+    call this%dstream%init(this%c_Xh)
+    this%stream_init = .true.
+    
+    ! Stream the mesh
+    call this%dstream%stream(this%c_Xh%dof%x)
+    call this%dstream%stream(this%c_Xh%dof%y)
+    call this%dstream%stream(this%c_Xh%dof%z)
+
+    ! Stream the mass matrix
+    call this%dstream%stream(this%c_Xh%B)
+
+    !> Decide if the fields should be streamed
+    call params%get('case.fluid.pressure_solver.stream_fields', this%stream_fields, &
+                    found)
+    if (.not. found) then
+       this%stream_fields = .false.
     end if
 
   end subroutine fluid_pnpn_init
@@ -453,6 +479,9 @@ contains
     end if
 
     call this%vol_flow%free()
+
+    !> Finalize the stream
+    if (this%stream_init) call this%dstream%free()
 
   end subroutine fluid_pnpn_free
 
@@ -644,6 +673,20 @@ contains
       call fluid_step_info(tstep, t, dt, ksp_results)
 
       call this%scratch%relinquish_field(temp_indices)
+
+      !> Stream the fields
+      if (this%stream_fields) then
+         !> Stream the data every timestep
+         if (NEKO_BCKND_DEVICE .eq. 1) then
+            ! Move the data to the CPU to be able to write it
+            call device_memcpy(u%x, u%x_d, n, DEVICE_TO_HOST, sync=.true.)
+            call device_memcpy(v%x, v%x_d, n, DEVICE_TO_HOST, sync=.true.)
+            call device_memcpy(w%x, w%x_d, n, DEVICE_TO_HOST, sync=.true.)
+         end if
+         call this%dstream%stream(u%x)
+         call this%dstream%stream(v%x)
+         call this%dstream%stream(w%x)
+      end if
 
     end associate
     call profiler_end_region
