@@ -2,18 +2,253 @@
 #include <string>
 #include <iostream>
 #include <ctime>
+#include <vector>
 
-// Global Adios2 variables
-adios2::ADIOS adios;
-adios2::IO io_asynchronous;
-adios2::Engine writer_st;
-adios2::Engine reader_st;
-adios2::Variable<double> f2py_field;
-adios2::Variable<double> py2f_field;
-// Global C variables
-int rank, size;
-unsigned int reader_start;
-unsigned int reader_count;
+// Forward declarations
+class ContinuousArray;
+class Variable;
+
+// ===============================================================================================
+// Class that encapsulates a Continuous array
+// ===============================================================================================
+
+class ContinuousArray
+{
+public:
+    ContinuousArray(adios2::IO &io,
+                    const std::string &name,
+                    unsigned int global_size,
+                    unsigned int start,
+                    unsigned int count);
+    ~ContinuousArray() = default;
+
+    const std::string &get_name() const { return name_; }
+    const adios2::Variable<double> &get_array() const { return f2py_array_; }
+    unsigned int get_start() const { return start_; }
+    unsigned int get_count() const { return count_; }
+
+private:
+    std::string name_;
+    unsigned int global_size_;
+    unsigned int start_;
+    unsigned int count_;
+    adios2::Variable<double> f2py_array_;
+};
+
+ContinuousArray::ContinuousArray(adios2::IO &io,
+                                 const std::string &name,
+                                 unsigned int global_size,
+                                 unsigned int start,
+                                 unsigned int count)
+    : name_(name), global_size_(global_size), start_(start), count_(count)
+{
+    f2py_array_ = io.DefineVariable<double>(name_, {global_size_}, {start_}, {count_});
+}
+
+// ===============================================================================================
+// Class that encapsulates a variable
+// ===============================================================================================
+
+class Variable
+{
+public:
+    Variable(adios2::IO &io, const std::string &name);
+    ~Variable() = default;
+
+    const std::string &get_name() const { return name_; }
+    const adios2::Variable<int> &get_variable() const { return variable_; }
+
+private:
+    std::string name_;
+    adios2::Variable<int> variable_;
+};
+
+Variable::Variable(adios2::IO &io, const std::string &name)
+    : name_(name)
+{
+    variable_ = io.DefineVariable<int>(name_);
+}
+
+// ===============================================================================================
+// Class that encapsulates a stream
+// ===============================================================================================
+
+class Stream
+{
+public:
+    Stream(MPI_Comm comm,
+           const std::string &io_name = "globalArray",
+           int id = 0);
+    ~Stream();
+
+    void add_array(const std::string &name,
+                   unsigned int global_size,
+                   unsigned int start,
+                   unsigned int count);
+
+    void add_variable(const std::string &name);
+
+    void write_array(const double *field, unsigned int array_id);
+    void write_variable(const int *variable, unsigned int variable_id);
+
+    void read_array(double *field, unsigned int array_id);
+    void read_variable(int *variable, unsigned int variable_id);
+
+private:
+    MPI_Comm comm_;
+    int rank_ = 0;
+    int size_ = 0;
+    int id_ = 0;
+    std::string io_name_;
+    adios2::ADIOS adios_;
+    adios2::IO io_;
+    adios2::Engine writer_;
+    adios2::Engine reader_;
+    std::vector<ContinuousArray> arrays_;
+    std::vector<Variable> variables_;
+};
+
+// When initializing this, make sure the communicator has already been converted from Fortran to C
+Stream::Stream(MPI_Comm comm, const std::string &io_name, int id)
+    : comm_(comm), id_(id), io_name_(io_name), adios_(comm_)
+{
+    MPI_Comm_rank(comm_, &rank_);
+    MPI_Comm_size(comm_, &size_);
+
+    io_ = adios_.DeclareIO(io_name_ + "_io");
+    io_.SetEngine("SST");
+
+    const std::string writer_name = io_name_ + "_f2py";
+    const std::string reader_name = io_name_ + "_py2f";
+
+    if (rank_ == 0)
+    {
+        std::cout << "Opening " << writer_name << ".sst" << std::endl;
+        std::cout << "Opening " << reader_name << ".sst" << std::endl;
+    }
+
+    writer_ = io_.Open(writer_name, adios2::Mode::Write);
+    reader_ = io_.Open(reader_name, adios2::Mode::Read);
+}
+
+Stream::~Stream()
+{
+    if (writer_)
+    {
+        if (rank_ == 0)
+        {
+            std::cout << "Closing writer" << std::endl;
+        }
+        writer_.Close();
+    }
+
+    if (reader_)
+    {
+        if (rank_ == 0)
+        {
+            std::cout << "Closing reader" << std::endl;
+        }
+        reader_.Close();
+    }
+}
+
+void Stream::add_array(const std::string &name,
+                       unsigned int global_size,
+                       unsigned int start,
+                       unsigned int count)
+{
+    arrays_.emplace_back(io_, name, global_size, start, count);
+}
+
+void Stream::add_variable(const std::string &name)
+{
+    variables_.emplace_back(io_, name);
+}
+
+void Stream::write_array(const double *field, unsigned int array_id)
+{
+    // Fortran IDs are 1-based
+    if (array_id == 0 || array_id > arrays_.size())
+    {
+        std::cerr << "Array ID " << array_id << " is out of bounds." << std::endl;
+        return;
+    }
+
+    writer_.BeginStep();
+    writer_.Put(arrays_[array_id - 1].get_array(), field);
+    writer_.EndStep();
+}
+
+void Stream::write_variable(const int *variable, unsigned int variable_id)
+{
+    // Fortran IDs are 1-based
+    if (variable_id == 0 || variable_id > variables_.size())
+    {
+        std::cerr << "Variable ID " << variable_id << " is out of bounds." << std::endl;
+        return;
+    }
+
+    writer_.BeginStep();
+    writer_.Put(variables_[variable_id - 1].get_variable(), *variable);
+    writer_.EndStep();
+}
+
+void Stream::read_array(double *field, unsigned int array_id)
+{
+    if (array_id == 0 || array_id > arrays_.size())
+    {
+        std::cerr << "Array ID " << array_id << " is out of bounds." << std::endl;
+        return;
+    }
+
+    reader_.BeginStep();
+
+    adios2::Variable<double> py2f_array =
+        io_.InquireVariable<double>(arrays_[array_id - 1].get_name());
+
+    if (!py2f_array)
+    {
+        std::cerr << "Could not inquire array " << arrays_[array_id - 1].get_name()
+                  << std::endl;
+        reader_.EndStep();
+        return;
+    }
+
+    py2f_array.SetSelection({{arrays_[array_id - 1].get_start()},
+                             {arrays_[array_id - 1].get_count()}});
+
+    reader_.Get(py2f_array, field);
+    reader_.EndStep();
+}
+
+void Stream::read_variable(int *variable, unsigned int variable_id)
+{
+    if (variable_id == 0 || variable_id > variables_.size())
+    {
+        std::cerr << "Variable ID " << variable_id << " is out of bounds." << std::endl;
+        return;
+    }
+
+    reader_.BeginStep();
+
+    adios2::Variable<int> py2f_variable =
+        io_.InquireVariable<int>(variables_[variable_id - 1].get_name());
+
+    if (!py2f_variable)
+    {
+        std::cerr << "Could not inquire variable " << variables_[variable_id - 1].get_name()
+                  << std::endl;
+        reader_.EndStep();
+        return;
+    }
+
+    reader_.Get(py2f_variable, variable);
+    reader_.EndStep();
+}
+
+// ===============================================================================================
+// C functions for fortran to call
+// ===============================================================================================
 
 extern "C" void adios2_initialize_(
     const int *lxyz,
@@ -23,71 +258,26 @@ extern "C" void adios2_initialize_(
     const int *gdim,
     const int *comm_int
 ){
-    MPI_Comm comm = MPI_Comm_f2c(*comm_int);
-    adios = adios2::ADIOS(comm);
-    MPI_Comm_rank(comm, &rank);
-    MPI_Comm_size(comm, &size);
-    // Asynchronous IO.
-    io_asynchronous = adios.DeclareIO("streamIO");
-    io_asynchronous.SetEngine("SST");
-
-    // Number of elements in my rank.
-    unsigned int nel = static_cast<unsigned int>((*nelv));
-    // Determine where my rank writes in the global array according to number of element in previous ranks
-    unsigned int start = static_cast<unsigned int>(*offset_el);
-    start *= static_cast<unsigned int>(*lxyz);
-    // n is count, i.e number of entries in the array in my rank
-    unsigned int n = static_cast<unsigned int> (*lxyz) * nel;
-    // gn is the total size of the arrays, not per io rank 
-    unsigned int gn = static_cast<unsigned int>((*glb_nelv)*(*lxyz));
- 
-    // Assign to global variables
-    reader_start = start;
-    reader_count = n;
-
-    // If the process is asynchronous, define the relevant variables for writer_st
-    f2py_field = io_asynchronous.DefineVariable<double>("f2py_field", {gn}, {start}, {n});
-    
-    // If asyncrhonous execution, open the global array
-    std::cout << "create global array" << std::endl;
-    writer_st = io_asynchronous.Open("globalArray_f2py", adios2::Mode::Write);
-    reader_st = io_asynchronous.Open("globalArray_py2f", adios2::Mode::Read);
-
-    // Put necesary information in a header stream
-    writer_st.BeginStep();
-    adios2::Variable<int> hdr_elems = io_asynchronous.DefineVariable<int>("global_elements");
-    adios2::Variable<int> hdr_lxyz = io_asynchronous.DefineVariable<int>("points_per_element");
-    adios2::Variable<int> hdr_gdim = io_asynchronous.DefineVariable<int>("problem_dimension");
-    if( rank == 0 )
-    {
-       writer_st.Put(hdr_elems, static_cast<int> (*glb_nelv));
-       writer_st.Put(hdr_lxyz,  static_cast<int> (*lxyz));
-       writer_st.Put(hdr_gdim,  static_cast<int> (*gdim));
-    }
-    writer_st.EndStep();
+    (void) lxyz;
+    (void) nelv;
+    (void) offset_el;
+    (void) glb_nelv;
+    (void) gdim;
+    (void) comm_int;
 }
 
-extern "C" void adios2_finalize_(){
-    std::cout << "Close global arrays" << std::endl;
-    writer_st.Close();
-    reader_st.Close();
-
+extern "C" void adios2_finalize_()
+{
 }
 
 extern "C" void adios2_stream_(
     const double *field
 ){
-    writer_st.BeginStep();
-    writer_st.Put<double>(f2py_field, field);
-    writer_st.EndStep();
+    (void) field;
 }
 
 extern "C" void adios2_recieve_(
     double *field
 ){
-    reader_st.BeginStep();
-    py2f_field = io_asynchronous.InquireVariable<double>("py2f_field");
-    py2f_field.SetSelection({{reader_start}, {reader_count}});
-    reader_st.Get<double>(py2f_field, field);
-    reader_st.EndStep();
+    (void) field;
 }
