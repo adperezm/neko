@@ -3,7 +3,7 @@ module user
   implicit none
 
   ! Data streamer
-  type(data_streamer_t) :: dstream
+  type(data_streamer_t) :: dstream, dstream1, dstream2
   integer :: ipostproc ! frequency of the streaming
   type(coef_t), pointer :: coef
 
@@ -38,12 +38,15 @@ contains
 
     ! Initialize the streamer
     coef => neko_user_access%case%fluid%c_Xh
-    call dstream%init(coef)
+    
+    call dstream1%init(1, "stream", 300)
+    
+    call dstream2%init(2, "stream2", 300)
 
     ! Stream the mesh
-    call dstream%stream(coef%dof%x)
-    call dstream%stream(coef%dof%y)
-    call dstream%stream(coef%dof%z)
+    !call dstream%stream(coef%dof%x)
+    !call dstream%stream(coef%dof%y)
+    !call dstream%stream(coef%dof%z)
 
   end subroutine initialize
 
@@ -78,9 +81,9 @@ contains
     call device_memcpy(w%x, w%x_d, n, DEVICE_TO_HOST, sync=.true.)
 
     ! Stream the data
-    call dstream%stream(u%x)
-    call dstream%stream(v%x)
-    call dstream%stream(w%x)
+    !call dstream%stream(u%x)
+    !call dstream%stream(v%x)
+    !call dstream%stream(w%x)
 
   end subroutine compute
 
@@ -89,7 +92,7 @@ contains
     type(time_state_t), intent(in) :: time
 
     ! Finalize the stream
-    call dstream%free()
+    !call dstream%free()
 
   end subroutine finalize
 

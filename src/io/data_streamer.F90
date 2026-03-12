@@ -56,11 +56,19 @@ module data_streamer
      integer :: if_asynch
      !> global element numbers
      integer, allocatable :: lglel(:)
+     integer :: id
+     integer :: n_vars = 0
+     integer :: n_arrays = 0
+     character(len=256) :: var_names(20)
+     character(len=256) :: array_names(20)
+
    contains
      !> Constructor
      procedure, pass(this) :: init => data_streamer_init
      !> Destructor
      procedure, pass(this) :: free => data_streamer_free
+     !> Add a variable (for the moment just an int number)
+     procedure, pass(this) :: add_variable => data_streamer_add_variable
      !> Stream data
      procedure, pass(this) :: stream => data_streamer_stream
      !> Stream back the data
@@ -76,20 +84,30 @@ contains
   !! on the case.
   !! @param if_asynch Controls whether the asyncrhonous executions
   !! is to be enabled.
-  subroutine data_streamer_init(this, coef)
-    class(data_streamer_t), intent(inout) :: this
-    type(coef_t), intent(inout) :: coef
-    integer :: nelb, nelv, nelgv, npts, gdim
+  subroutine data_streamer_init(this, id, name, timeout_seconds)
+    class(data_streamer_t), intent(inout) :: this 
+    integer, intent(in) :: id
+    character(len=*), intent(in), optional :: name
+    integer, intent(in), optional :: timeout_seconds
+    character(len=256) :: io_name
+    integer :: timeout
 
-    !Assign the set up parameters
-    nelv = coef%msh%nelv
-    npts = coef%Xh%lx*coef%Xh%ly*coef%Xh%lz
-    nelgv = coef%msh%glb_nelv
-    nelb = coef%msh%offset_el
-    gdim = coef%msh%gdim
+    this%id = id
+
+    if (present(name)) then
+        io_name = name
+    else
+        write(io_name, '(A,I0)') 'globalArray', id
+    end if
+
+    if (present(timeout_seconds)) then
+        timeout = timeout_seconds
+    else
+        timeout = 300
+    end if
 
 #ifdef HAVE_ADIOS2
-    call fortran_adios2_initialize(npts, nelv, nelb, nelgv, gdim, NEKO_COMM)
+    call fortran_adios2_initialize(NEKO_COMM, io_name, id, timeout)
 #else
     call neko_warning('Is not being built with ADIOS2 support.')
     call neko_warning('Not able to use stream/compression functionality')
@@ -97,6 +115,22 @@ contains
 
 
   end subroutine data_streamer_init
+
+  subroutine data_streamer_add_variable(this, var_name)
+    class(data_streamer_t), intent(inout) :: this
+    character(len=*), intent(in) :: var_name
+
+#ifdef HAVE_ADIOS2
+
+    this%n_vars = this%n_vars + 1
+    this%var_names(this%n_vars) = var_name
+
+    call fortran_adios2_add_variable(var_name)
+#else
+    call neko_warning('Is not being built with ADIOS2 support.')
+    call neko_warning('Not able to use stream/compression functionality')
+#endif
+  end subroutine data_streamer_add_variable
 
   !> Destructor
   !! wraps the adios2 finalize routine. Closes insitu writer
@@ -145,43 +179,65 @@ contains
 
 #ifdef HAVE_ADIOS2
 
-  !> Interface to adios2_initialize in c++.
-  !! @details This routine interfaces with c++ routine that set up adios2
-  !! if streaming, the global array to pair writer and reader is opened.
-  !! @param npts number of points per element
-  !! @param nelv number of elements in this rank
-  !! @param nelb number of elements in ranks before this one
-  !! @param nelgv total number of elements in velocity mesh
-  !! @param gdim dimension (2d or 3d)
-  !! @param comm simulation communicator
-  subroutine fortran_adios2_initialize(npts, nelv, nelb, nelgv, gdim, comm)
-    use, intrinsic :: ISO_C_BINDING
+
+  subroutine fortran_adios2_initialize(comm, io_name, id, timeout_seconds)
+    use, intrinsic :: iso_c_binding, only: c_char, c_null_char, c_int
+    use mpi_f08, only: MPI_COMM
     implicit none
-    integer, intent(in) :: npts, nelv, nelb, nelgv, gdim
-    type(MPI_COMM) :: comm
+
+    type(MPI_COMM), intent(in) :: comm
+    character(len=*), intent(in) :: io_name
+    integer, intent(in) :: id
+    integer, intent(in) :: timeout_seconds
+
+    character(kind=c_char, len=:), allocatable :: io_name_c
+    integer(c_int) :: id_c
+    integer(c_int) :: timeout_c
 
     interface
-       !> C-definition is: void adios2_initialize_(const int *nval,
-       !! const int *nelvin,const int *nelb, const int *nelgv,
-       !! const int *nelgt, const double *xml,const double *yml,
-       !! const double *zml, const int *if_asynchronous,
-       !! const int *comm_int)
-       subroutine c_adios2_initialize(npts, nelv, nelb, nelgv, gdim, &
-                                      comm) bind(C,name="adios2_initialize_")
-         use, intrinsic :: ISO_C_BINDING
-         import c_rp
-         implicit none
-         integer(kind=C_INT) :: npts
-         integer(kind=C_INT) :: nelv
-         integer(kind=C_INT) :: nelb
-         integer(kind=C_INT) :: nelgv
-         integer(kind=C_INT) :: gdim
-         type(*) :: comm
-       end subroutine c_adios2_initialize
+      subroutine c_adios2_initialize(comm, io_name, id, timeout_seconds) &
+            bind(C, name="adios2_initialize_")
+        use, intrinsic :: iso_c_binding, only: c_char, c_int
+        implicit none
+        type(*) :: comm
+        character(kind=c_char), intent(in) :: io_name(*)
+        integer(c_int), intent(in) :: id
+        integer(c_int), intent(in) :: timeout_seconds
+      end subroutine c_adios2_initialize
     end interface
 
-    call c_adios2_initialize(npts, nelv, nelb, nelgv, gdim, comm)
+    ! Convert to plain interoperable values
+    io_name_c = trim(io_name)//c_null_char
+    id_c = id
+    timeout_c = timeout_seconds
+
+    call c_adios2_initialize(comm, io_name_c, id_c, timeout_c)
+
   end subroutine fortran_adios2_initialize
+
+
+  subroutine fortran_adios2_add_variable(var_name)
+    use, intrinsic :: iso_c_binding, only: c_char, c_null_char
+    implicit none
+
+    character(len=*), intent(in) :: var_name
+    character(kind=c_char, len=:), allocatable :: var_name_c
+
+    interface
+      subroutine c_adios2_add_variable(var_name) &
+            bind(C, name="adios2_add_variable_")
+        use, intrinsic :: iso_c_binding, only: c_char
+        implicit none
+        character(kind=c_char), intent(in) :: var_name(*)
+      end subroutine c_adios2_add_variable
+    end interface
+
+    ! Convert to plain interoperable values
+    var_name_c = trim(var_name)//c_null_char
+
+    call c_adios2_add_variable(var_name_c)
+
+  end subroutine fortran_adios2_add_variable
 
   !> Interface to adios2_finalize in c++.
   !! closes any writer openned at initialization time

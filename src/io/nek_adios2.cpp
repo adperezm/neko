@@ -1,4 +1,5 @@
 #include <adios2.h>
+#include <memory>
 #include <string>
 #include <iostream>
 #include <ctime>
@@ -78,7 +79,8 @@ class Stream
 public:
     Stream(MPI_Comm comm,
            const std::string &io_name = "globalArray",
-           int id = 0);
+           int id = 0, 
+           int timeout_seconds = 300);
     ~Stream();
 
     void add_array(const std::string &name,
@@ -99,6 +101,7 @@ private:
     int rank_ = 0;
     int size_ = 0;
     int id_ = 0;
+    int timeout_seconds_ = 300;
     std::string io_name_;
     adios2::ADIOS adios_;
     adios2::IO io_;
@@ -109,14 +112,15 @@ private:
 };
 
 // When initializing this, make sure the communicator has already been converted from Fortran to C
-Stream::Stream(MPI_Comm comm, const std::string &io_name, int id)
-    : comm_(comm), id_(id), io_name_(io_name), adios_(comm_)
+Stream::Stream(MPI_Comm comm, const std::string &io_name, int id, int timeout_seconds)
+    : comm_(comm), id_(id), io_name_(io_name), adios_(comm_), timeout_seconds_(timeout_seconds)
 {
     MPI_Comm_rank(comm_, &rank_);
     MPI_Comm_size(comm_, &size_);
 
     io_ = adios_.DeclareIO(io_name_ + "_io");
     io_.SetEngine("SST");
+    io_.SetParameters({{"OpenTimeoutSecs", std::to_string(timeout_seconds_)}});
 
     const std::string writer_name = io_name_ + "_f2py";
     const std::string reader_name = io_name_ + "_py2f";
@@ -249,25 +253,38 @@ void Stream::read_variable(int *variable, unsigned int variable_id)
 // ===============================================================================================
 // C functions for fortran to call
 // ===============================================================================================
+std::vector<std::unique_ptr<Stream>> streams;
 
 extern "C" void adios2_initialize_(
-    const int *lxyz,
-    const int *nelv,
-    const int *offset_el,
-    const int *glb_nelv,
-    const int *gdim,
-    const int *comm_int
-){
-    (void) lxyz;
-    (void) nelv;
-    (void) offset_el;
-    (void) glb_nelv;
-    (void) gdim;
-    (void) comm_int;
+    const int *comm,
+    const char *io_name,
+    const int id,
+    const int timeout_seconds)
+{
+    MPI_Comm c_comm = MPI_Comm_f2c(*comm);
+    std::string io_name_str(io_name);
+    streams.emplace_back(std::make_unique<Stream>(c_comm, io_name_str, id, timeout_seconds));
 }
 
-extern "C" void adios2_finalize_()
+extern "C" void adios2_write_variable_(
+    const int stream_id,
+    const char *var_name,
+    const int *variable)
 {
+
+    if (stream_id == 0 || stream_id > streams.size())
+    {
+        std::cerr << "Stream ID " << stream_id << " is out of bounds." << std::endl;
+        return;
+    }
+
+    std::string var_name_str(var_name);
+
+    // Search for the variable by name and write it.
+    int it = std::find_if(streams[stream_id - 1]->variables_.begin(), streams[stream_id - 1]->variables_.end(),
+                       [&var_name_str](const Variable &var) { return var.get_name() == var_name_str; });
+
+    streams[stream_id - 1]->write_variable(variable, it);    
 }
 
 extern "C" void adios2_stream_(
