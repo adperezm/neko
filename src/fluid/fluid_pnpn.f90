@@ -685,6 +685,7 @@ contains
     ! Solver results monitors (pressure + 3 velocity)
     type(ksp_monitor_t) :: ksp_results(4)
     integer :: iter
+   character(len=LOG_SIZE) :: log_buf
 
     type(file_t) :: dump_file
     class(bc_t), pointer :: bc_i
@@ -716,14 +717,20 @@ contains
          ext_bdf => this%ext_bdf, event => glb_cmd_event, &
          ale => this%ale)
 
-      ! Extrapolate the velocity if it's not done in nut_field estimation
+       write(log_buf, '(A)') 'Extrapolation'
+       call neko_log%message(log_buf)
+       ! Extrapolate the velocity if it's not done in nut_field estimation
       call sumab%compute_fluid(u_e, v_e, w_e, u, v, w, &
            ulag, vlag, wlag, ext_bdf%advection_coeffs%x, ext_bdf%nadv)
 
+       write(log_buf, '(A)') 'Compute source terms'
+       call neko_log%message(log_buf)
       ! Compute the source terms
       call this%source_term%compute(time)
 
       ! Add Neumann bc contributions to the RHS
+       write(log_buf, '(A)') 'Add neumann BC contributions to the RHS'
+       call neko_log%message(log_buf)
       call this%bcs_vel%apply_vector(f_x%x, f_y%x, f_z%x, &
            this%dm_Xh%size(), time, strong = .false.)
 
@@ -742,6 +749,8 @@ contains
 
       if (oifs) then
          ! Add the advection operators to the right-hand-side.
+         write(log_buf, '(A)') 'Add the advection operators to the right-hand-side.'
+         call neko_log%message(log_buf)
          call this%adv%compute(u, v, w, &
               this%advx, this%advy, this%advz, &
               Xh, this%c_Xh, dm_Xh%size(), dt)
@@ -762,6 +771,8 @@ contains
               rho%x(1,1,1,1), dt, n)
       else
          ! Add the advection operators to the right-hand-side.
+         write(log_buf, '(A)') 'Add the advection operators to the right-hand-side - OIFS.'
+         call neko_log%message(log_buf)
          call this%adv%compute(u, v, w, &
               f_x, f_y, f_z, &
               Xh, this%c_Xh, dm_Xh%size())
@@ -804,16 +815,30 @@ contains
       call vlag%update()
       call wlag%update()
 
+      write(log_buf, '(A)') 'Updated lagged velocity fields'
+      call neko_log%message(log_buf)
+
       ! Update material properties if necessary
+      write(log_buf, '(A)') 'Update material properties'
+      call neko_log%message(log_buf)
       call this%update_material_properties(time)
 
       do iter = 1, 1 + this%schwarz_iterations
+
+         write(log_buf, '(A,I0,A,I0)') 'Starting substep ', iter, ' of ', &
+              1 + this%schwarz_iterations
+         call neko_log%message(log_buf)
+
+         write(log_buf, '(A)') 'Apply strong boundary conditions'
+         call neko_log%message(log_buf)
 
          call this%bc_apply_vel(time, strong = .true.)
          call this%bc_apply_prs(time)
 
          ! Compute pressure residual.
          call profiler_start_region('Pressure_residual', 18)
+         write(log_buf, '(A)') 'Compute pressure residual'
+         call neko_log%message(log_buf)
          call prs_res%compute(p, p_res,&
               u, v, w, &
               u_e, v_e, w_e, &
@@ -840,6 +865,9 @@ contains
 
          call profiler_end_region('Pressure_residual', 18)
 
+       write(log_buf, '(A)') 'Prepare pressure projection and preconditioner'
+       call neko_log%message(log_buf)
+
          call this%proj_prs%pre_solving(p_res%x, tstep, c_Xh, n, dt_controller, &
               Ax = Ax_prs, gs_h = gs_Xh, bclst = this%bclst_dp, &
               string = 'Pressure')
@@ -847,6 +875,9 @@ contains
          call this%pc_prs%update()
 
          call profiler_start_region('Pressure_solve', 3)
+
+             write(log_buf, '(A)') 'Solve pressure system'
+             call neko_log%message(log_buf)
 
          ! Solve for the pressure increment.
          ksp_results(1) = &
@@ -861,6 +892,8 @@ contains
               this%bclst_dp, gs_Xh, n, tstep, dt_controller)
 
          ! Update the pressure with the increment. Demean if necessary.
+             write(log_buf, '(A)') 'Update pressure field'
+             call neko_log%message(log_buf)
          call field_add2(p, dp, n)
          if (.not. this%prs_dirichlet .and. NEKO_BCKND_DEVICE .eq. 1) then
             call device_ortho(p%x_d, this%glb_n_points, n)
@@ -870,6 +903,8 @@ contains
 
          ! Compute velocity residual.
          call profiler_start_region('Velocity_residual', 19)
+       write(log_buf, '(A)') 'Compute velocity residual'
+       call neko_log%message(log_buf)
          call vel_res%compute(Ax_vel, u, v, w, &
               u_res, v_res, w_res, &
               p, &
@@ -896,9 +931,13 @@ contains
          call this%proj_vel%pre_solving(u_res%x, v_res%x, w_res%x, &
               tstep, c_Xh, n, dt_controller, 'Velocity')
 
+             write(log_buf, '(A)') 'Update velocity preconditioner'
+             call neko_log%message(log_buf)
          call this%pc_vel%update()
 
          call profiler_start_region("Velocity_solve", 4)
+             write(log_buf, '(A)') 'Solve coupled velocity system'
+             call neko_log%message(log_buf)
          ksp_results(2:4) = this%ksp_vel%solve_coupled(Ax_vel, du, dv, dw, &
               u_res%x, v_res%x, w_res%x, n, c_Xh, &
               this%bclst_du, this%bclst_dv, this%bclst_dw, gs_Xh, &
@@ -915,6 +954,9 @@ contains
          call this%proj_vel%post_solving(du%x, dv%x, dw%x, Ax_vel, c_Xh, &
               this%bclst_du, this%bclst_dv, this%bclst_dw, gs_Xh, n, tstep, &
               dt_controller)
+
+             write(log_buf, '(A)') 'Update velocity fields from increments'
+             call neko_log%message(log_buf)
 
          if (NEKO_BCKND_DEVICE .eq. 1) then
             call device_opadd2cm(u%x_d, v%x_d, w%x_d, &
