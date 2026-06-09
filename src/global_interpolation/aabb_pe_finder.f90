@@ -146,6 +146,7 @@ contains
 
     call MPI_Allreduce(MPI_IN_PLACE, this%pe_box_num, 1, MPI_INTEGER, &
          MPI_MIN, this%comm, ierr)
+    write(*,*), 'REDUCEDEBUG PE box num after Allreduce:', this%pe_box_num
 
     this%pe_box_num = max(this%pe_box_num,2) !> At least 2 boxes
     this%glob_map_size = this%pe_box_num*this%pe_size
