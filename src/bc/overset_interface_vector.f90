@@ -462,7 +462,7 @@ contains
     w => neko_registry%get_field("w")
 
     !> Interpolate the values
-    write(*,*) "Performing extrapolation for overset interface at time step ", time%tstep, time%t
+    write(*,*) "Performing interpolation for overset interface at time step ", time%tstep, time%t
     call this%interface_interpolator%evaluate_masked(this%u_interface%x, u%x, this%domain_element_mask, .false.)
     call this%interface_interpolator%evaluate_masked(this%v_interface%x, v%x, this%domain_element_mask, .false.)
     call this%interface_interpolator%evaluate_masked(this%w_interface%x, w%x, this%domain_element_mask, .false.)
@@ -481,6 +481,7 @@ contains
        ! Get the coefficients for the extrapolation
        nhist = min(time%tstep, this%iextm_order)
        call time_scheme%compute_coeffs(iextm_coeffs, time%dtlag, nhist)
+       write(*,*) "Extrapolation coefficients: ", iextm_coeffs
 
        ! Perfrom the extrapolation using the lag arrays
        call vector_cmult2(this%u_interface, this%u_interface_lag%lv(1), iextm_coeffs(1))
