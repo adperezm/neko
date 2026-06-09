@@ -67,43 +67,43 @@ contains
     call rzero(coeffs, 4)
 
     ! This is the direct way, working for constant tstep
-    !select case (order)
-    !case (1)
-    !   coeffs(1) = 1.0_rp
-    !case (2)
-    !   coeffs(2) = -1.0_rp
-    !   coeffs(1) = 2.0_rp
-    !case (3)
-    !   coeffs(3) = 1.0_rp
-    !   coeffs(2) = -3.0_rp
-    !   coeffs(1) = 3.0_rp
-    !case default
-    !   call neko_error("The order of the IEXTm time scheme must be 1 to 3.")
-    !end select
-
-    if (order .lt. 1 .or. order .gt. 3) then
+    select case (order)
+    case (1)
+       coeffs(1) = 1.0_rp
+    case (2)
+       coeffs(2) = -1.0_rp
+       coeffs(1) = 2.0_rp
+    case (3)
+       coeffs(3) = 1.0_rp
+       coeffs(2) = -3.0_rp
+       coeffs(1) = 3.0_rp
+    case default
        call neko_error("The order of the IEXTm time scheme must be 1 to 3.")
-    end if
+    end select
+
+    !if (order .lt. 1 .or. order .gt. 3) then
+    !   call neko_error("The order of the IEXTm time scheme must be 1 to 3.")
+    !end if
 
     ! Create the nodes to build the interpolation basis
     ! This simply places old points as nodes in a 1d grid
-    x(0) = dt(1) ! Current timestep
-    do i = 1, order
-       x(i) = x(i-1) - dt(i)
-    end do
+    !x(0) = dt(1) ! Current timestep
+    !do i = 1, order
+    !   x(i) = x(i-1) - dt(i)
+    !end do
     ! Define the test point
-    xtest = x(0)
+    !xtest = x(0)
 
     !> Compute the Lagrange interpolation coefficients for xtest
-    do i = 1, order
-       basis = 1.0_rp
-       do j = 1, order
-          if (j .ne. i) then
-             basis = basis * (xtest - x(j)) / (x(i) - x(j))
-          end if
-       end do
-       coeffs(i) = basis
-    end do
+    !do i = 1, order
+    !   basis = 1.0_rp
+    !   do j = 1, order
+    !      if (j .ne. i) then
+    !         basis = basis * (xtest - x(j)) / (x(i) - x(j))
+    !      end if
+    !   end do
+    !   coeffs(i) = basis
+    !end do
 
   end subroutine iextm_time_scheme_compute_coeffs
 

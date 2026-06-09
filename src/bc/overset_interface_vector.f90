@@ -462,12 +462,14 @@ contains
     w => neko_registry%get_field("w")
 
     !> Interpolate the values
+    write(*,*) "Performing extrapolation for overset interface at time step ", time%tstep, time%time
     call this%interface_interpolator%evaluate_masked(this%u_interface%x, u%x, this%domain_element_mask, .false.)
     call this%interface_interpolator%evaluate_masked(this%v_interface%x, v%x, this%domain_element_mask, .false.)
     call this%interface_interpolator%evaluate_masked(this%w_interface%x, w%x, this%domain_element_mask, .false.)
 
     !> If this is the first substep, then we do the extrapolation
     if (time%tstep .ne. this%last_tstep) then
+       write(*,*) "Performing extrapolation for overset interface at time step ", time%tstep, time%time
        ! Update the last steps
        this%last_tstep = time%tstep
 
