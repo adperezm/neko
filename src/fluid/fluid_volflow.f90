@@ -111,7 +111,7 @@ contains
     type(json_file), intent(inout) :: params
     logical average, log_output
     integer :: direction
-    real(kind=rp) :: rate
+    real(kind=rp) :: rate, length
 
     call this%free()
 
@@ -123,11 +123,14 @@ contains
          average)
     call json_get_or_default(params, 'case.fluid.flow_rate_force.log', &
          log_output, .true.)
+    call json_get_or_default(params, 'case.fluid.flow_rate_force.direction_length', &
+         length, -1.0_rp)
 
     this%flow_dir = direction
     this%avflow = average
     this%log = log_output
     this%flow_rate = rate
+    this%domain_length = length
 
     if (this%flow_dir .ne. 0) then
        call this%u_vol%init(dm_Xh, 'u_vol')
@@ -194,14 +197,17 @@ contains
       ylmax = glmax(c_Xh%dof%y, n)
       zlmin = glmin(c_Xh%dof%z, n) !  for Z!
       zlmax = glmax(c_Xh%dof%z, n)
-      if (this%flow_dir .eq. 1) then
-         this%domain_length = xlmax - xlmin
-      end if
-      if (this%flow_dir .eq. 2) then
-         this%domain_length = ylmax - ylmin
-      end if
-      if (this%flow_dir .eq. 3) then
-         this%domain_length = zlmax - zlmin
+
+      if (this%domain_length .lt. 0.0_rp) then
+         if (this%flow_dir .eq. 1) then
+            this%domain_length = xlmax - xlmin
+         end if
+         if (this%flow_dir .eq. 2) then
+            this%domain_length = ylmax - ylmin
+         end if
+         if (this%flow_dir .eq. 3) then
+            this%domain_length = zlmax - zlmin
+         end if
       end if
 
       if (NEKO_BCKND_DEVICE .eq. 1) then
