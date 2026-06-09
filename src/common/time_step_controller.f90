@@ -171,11 +171,10 @@ contains
 
     ! If running in mpmd, the new dt is the minimum across simulations
     if (pe_size .ne. global_pe_size) then
-       global_min_dt = time%dt
-       call MPI_Allreduce(MPI_IN_PLACE, global_min_dt, 1, MPI_REAL_PRECISION, &
+       call MPI_Allreduce(time%dt, global_min_dt, 1, MPI_REAL_PRECISION, &
             MPI_MIN, NEKO_GLOBAL_COMM, ierr)
 
-       ! If my dt is larger that the global min, mark a change
+       ! If my dt is larger than the global min, mark a change
        if (time%dt .gt. global_min_dt) then
           time%dt = global_min_dt
           this%dt_last_change = 0
