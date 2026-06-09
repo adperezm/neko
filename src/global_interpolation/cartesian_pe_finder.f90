@@ -185,9 +185,9 @@ contains
     end if
 
 
-    write(*,*), 'REDUCEDEBUG minmaxglobal before Allreduce:', this%min_x_global, this%max_x_global
-    write(*,*), 'REDUCEDEBUG minmaxglobal before Allreduce:', this%min_y_global, this%max_y_global 
-    write(*,*), 'REDUCEDEBUG minmaxglobal before Allreduce:', this%min_z_global, this%max_z_global
+    write(*,*) 'REDUCEDEBUG minmaxglobal before Allreduce:', this%min_x_global, this%max_x_global
+    write(*,*) 'REDUCEDEBUG minmaxglobal before Allreduce:', this%min_y_global, this%max_y_global 
+    write(*,*) 'REDUCEDEBUG minmaxglobal before Allreduce:', this%min_z_global, this%max_z_global
     call MPI_Allreduce(MPI_IN_PLACE, this%max_x_global, 1, MPI_REAL_PRECISION, &
          MPI_MAX, this%comm, ierr)
     call MPI_Allreduce(MPI_IN_PLACE, this%max_y_global, 1, MPI_REAL_PRECISION, &
@@ -200,9 +200,9 @@ contains
          MPI_MIN, this%comm, ierr)
     call MPI_Allreduce(MPI_IN_PLACE, this%min_z_global, 1, MPI_REAL_PRECISION, &
          MPI_MIN, this%comm, ierr)
-    write(*,*), 'REDUCEDEBUG minmaxglobal after Allreduce:', this%min_x_global, this%max_x_global
-    write(*,*), 'REDUCEDEBUG minmaxglobal after Allreduce:', this%min_y_global, this%max_y_global 
-    write(*,*), 'REDUCEDEBUG minmaxglobal after Allreduce:', this%min_z_global, this%max_z_global
+    write(*,*) 'REDUCEDEBUG minmaxglobal after Allreduce:', this%min_x_global, this%max_x_global
+    write(*,*) 'REDUCEDEBUG minmaxglobal after Allreduce:', this%min_y_global, this%max_y_global 
+    write(*,*) 'REDUCEDEBUG minmaxglobal after Allreduce:', this%min_z_global, this%max_z_global
 
     center_x = (this%max_x_global + this%min_x_global) / 2.0_dp
     center_y = (this%max_y_global + this%min_y_global) / 2.0_dp
