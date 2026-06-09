@@ -144,6 +144,7 @@ contains
     this%pe_box_num = &
          max(1, ishft(1, ceiling(log(real(this%pe_box_num, rp)) / NEKO_M_LN2)))
 
+    write(*,*), 'REDUCEDEBUG PE box num before Allreduce:', this%pe_box_num
     call MPI_Allreduce(MPI_IN_PLACE, this%pe_box_num, 1, MPI_INTEGER, &
          MPI_MIN, this%comm, ierr)
     write(*,*), 'REDUCEDEBUG PE box num after Allreduce:', this%pe_box_num
