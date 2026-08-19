@@ -102,6 +102,11 @@ contains
 
     call MPI_Initialized(initialized, ierr)
 
+    write(error_unit, '(A,L1,A,I0)') &
+         '[NEKO STARTUP] MPI_Initialized returned initialized=', initialized, &
+         ', ierr=', ierr
+    flush(error_unit)
+
     call get_environment_variable("NEKO_COMM_ID", color_str, envvar_len)
     if (envvar_len .gt. 0) then
        read(color_str(1:envvar_len), *) color
@@ -138,15 +143,24 @@ contains
     if (.not.initialized) then
        if (user_thread_level) then
           if (requested_thread_level .eq. MPI_THREAD_SINGLE) then
+             write(error_unit, '(A)') '[NEKO STARTUP] Calling MPI_Init'
+             flush(error_unit)
              call MPI_Init(ierr)
              provided = MPI_THREAD_SINGLE
           else
+             write(error_unit, '(A,I0)') &
+                  '[NEKO STARTUP] Calling MPI_Init_thread, requested=', &
+                  requested_thread_level
+             flush(error_unit)
              call MPI_Init_thread(requested_thread_level, provided, ierr)
              if (provided .lt. requested_thread_level) then
                 call neko_error('Requested MPI thread level not provided')
              end if
           end if
        else if (nthrds .gt. 1) then
+          write(error_unit, '(A)') &
+               '[NEKO STARTUP] Calling MPI_Init_thread for OpenMP'
+          flush(error_unit)
           call MPI_Init_thread(MPI_THREAD_MULTIPLE, provided, ierr)
           if (provided .lt. MPI_THREAD_MULTIPLE) then
              ! MPI_THREAD_MULTIPLE is required for mt. device backends. For
@@ -160,6 +174,8 @@ contains
              end if
           end if
        else
+          write(error_unit, '(A)') '[NEKO STARTUP] Calling MPI_Init'
+          flush(error_unit)
           call MPI_Init(ierr)
        end if
     else
