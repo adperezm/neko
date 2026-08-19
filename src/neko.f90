@@ -173,16 +173,46 @@ contains
 
     call date_and_time(time = time, date = date)
 
+    write(error_unit, '(A)') '[NEKO STARTUP] Calling comm_init'
+    flush(error_unit)
     call comm_init
+
+    write(error_unit, '(A,I0)') &
+         '[NEKO STARTUP] Initializing MPI datatypes on global rank ', &
+         global_pe_rank
+    flush(error_unit)
     call neko_mpi_types_init
+
+    write(error_unit, '(A,I0)') &
+         '[NEKO STARTUP] Initializing job control on global rank ', &
+         global_pe_rank
+    flush(error_unit)
     call jobctrl_init
+
+    write(error_unit, '(A,I0)') &
+         '[NEKO STARTUP] Initializing device on global rank ', global_pe_rank
+    flush(error_unit)
     call device_init
+
+    write(error_unit, '(A,I0)') &
+         '[NEKO STARTUP] Initializing HDF5 on global rank ', global_pe_rank
+    flush(error_unit)
     call hdf5_session_init
+
+    write(error_unit, '(A,I0)') &
+         '[NEKO STARTUP] Pre-logger initialization complete on global rank ', &
+         global_pe_rank
+    flush(error_unit)
 
     call neko_log%init()
     call neko_registry%init()
     call neko_const_registry%init()
     call neko_scratch_registry%init()
+
+    write(error_unit, '(A,I0)') &
+         '[NEKO STARTUP] Logger and registries ready on global rank ', &
+         global_pe_rank
+    flush(error_unit)
 
     call neko_log%header(NEKO_VERSION, NEKO_BUILD_INFO)
 
@@ -227,7 +257,15 @@ contains
        !
        ! Create case
        !
+       write(error_unit, '(A,I0)') &
+            '[NEKO STARTUP] Creating case on global rank ', global_pe_rank
+       flush(error_unit)
        call C%init(case_file)
+
+       write(error_unit, '(A,I0)') &
+            '[NEKO STARTUP] Case creation complete on global rank ', &
+            global_pe_rank
+       flush(error_unit)
 
        !
        ! Setup runtime statistics
@@ -238,7 +276,15 @@ contains
        !
        ! Create simulation components
        !
+       write(error_unit, '(A,I0)') &
+            '[NEKO STARTUP] Initializing simulation components on global rank ', &
+            global_pe_rank
+       flush(error_unit)
        call neko_simcomps%init(C)
+
+       write(error_unit, '(A,I0)') &
+            '[NEKO STARTUP] neko_init complete on global rank ', global_pe_rank
+       flush(error_unit)
 
     end if
 
