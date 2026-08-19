@@ -8,6 +8,7 @@ module comm
   use utils, only : neko_error
   use neko_config
   use shmem
+  use, intrinsic :: iso_fortran_env, only : error_unit
   !$ use omp_lib
   implicit none
   private
@@ -96,6 +97,9 @@ contains
     pe_size = 0
     nio = .false.
 
+    write(error_unit, '(A)') '[NEKO STARTUP] Entering comm_init'
+    flush(error_unit)
+
     call MPI_Initialized(initialized, ierr)
 
     call get_environment_variable("NEKO_COMM_ID", color_str, envvar_len)
@@ -162,6 +166,9 @@ contains
        call MPI_Query_thread(provided, ierr)
     end if
 
+    write(error_unit, '(A,I0)') '[NEKO STARTUP] MPI initialized, ierr=', ierr
+    flush(error_unit)
+
     NEKO_MPI_THREAD_PROVIDED = provided
 
 #ifndef HAVE_MPI_PARAM_DTYPE
@@ -179,6 +186,10 @@ contains
     call MPI_Comm_dup(MPI_COMM_WORLD, NEKO_GLOBAL_COMM, ierr)
 #endif
 
+    write(error_unit, '(A,I0)') &
+         '[NEKO STARTUP] Global communicator created, ierr=', ierr
+    flush(error_unit)
+
     call MPI_Comm_rank(NEKO_GLOBAL_COMM, global_pe_rank, ierr)
     call MPI_Comm_size(NEKO_GLOBAL_COMM, global_pe_size, ierr)
     if (envvar_len .gt. 0) then
@@ -190,8 +201,18 @@ contains
     call MPI_Comm_rank(NEKO_COMM, pe_rank, ierr)
     call MPI_Comm_size(NEKO_COMM, pe_size, ierr)
 
+    write(error_unit, '(A,I0,A,I0,A,I0,A,I0)') &
+         '[NEKO STARTUP] Communicators ready: global rank=', global_pe_rank, &
+         '/', global_pe_size, ', local rank=', pe_rank, '/', pe_size
+    flush(error_unit)
+
     ! Setup C/C++ wrapper
     call neko_comm_wrapper_init(NEKO_COMM%mpi_val)
+
+    write(error_unit, '(A,I0)') &
+         '[NEKO STARTUP] Communication wrapper ready on global rank ', &
+         global_pe_rank
+    flush(error_unit)
 
 
 #ifdef HAVE_NVSHMEM
