@@ -63,6 +63,7 @@ module overset_interface
   use scratch_registry, only : neko_scratch_registry
   use mpi_f08, only : MPI_Allreduce, MPI_INTEGER, MPI_SUM
   use, intrinsic :: iso_c_binding, only : c_ptr
+  use profiler, only : profiler_start_region, profiler_end_region
   use time_state, only : time_state_t
   implicit none
   private
@@ -358,12 +359,14 @@ contains
     end if
 
     if (strong_) then
+       call profiler_start_region('Overset scalar apply')
        if (.not. this%updated) then
           call this%update(time)
           this%updated = .true.
        end if
 
        call masked_copy_0(x, this%bc_s%field_bc%x, this%msk, n, this%msk(0))
+       call profiler_end_region('Overset scalar apply')
     end if
 
   end subroutine overset_interface_apply_scalar
@@ -387,6 +390,7 @@ contains
     end if
 
     if (strong_) then
+       call profiler_start_region('Overset scalar apply')
        if (.not. this%updated) then
           call this%update(time)
           this%updated = .true.
@@ -396,6 +400,7 @@ contains
           call device_masked_copy_0(x_d, this%bc_s%field_bc%x_d, &
                this%bc_s%msk_d, this%bc_s%dof%size(), this%msk(0), strm)
        end if
+       call profiler_end_region('Overset scalar apply')
     end if
 
   end subroutine overset_interface_apply_scalar_dev
@@ -479,10 +484,14 @@ contains
     real(kind=rp) :: iextm_coeffs(4)
     logical :: new_tstep
 
+    call profiler_start_region('Overset scalar update')
+
     !> Change the coordinates of the interface if set up by the user
     call this%morph_interface(this%interface_dof, this%interface_field, &
          this%interface_dof_mask, time, this%name, &
          this%find_interface)
+
+    call profiler_start_region('Overset scalar interp')
 
     !> Find points if needed - later make sure only in first substep
     if (this%find_interface) then
@@ -506,7 +515,11 @@ contains
     if (.not. this%restart_pending) then
        call this%interface_interpolator%evaluate_masked(this%s_interface%x, &
             s%x, this%domain_element_mask, .false.)
+    end if
 
+    call profiler_end_region('Overset scalar interp')
+
+    if (.not. this%restart_pending) then
        if (this%log) then
           call this%log_interface_error_(s)
        end if
@@ -515,6 +528,7 @@ contains
     new_tstep = time%tstep .ne. this%last_tstep
 
     if (new_tstep) then
+       call profiler_start_region('Overset scalar extrap')
        this%last_tstep = time%tstep
 
        call this%s_interface_lag%update()
@@ -531,6 +545,7 @@ contains
        end do
 
        this%restart_pending = .false.
+       call profiler_end_region('Overset scalar extrap')
     end if
 
     ! Preserve the IEXT prediction on the first pass of every physical
@@ -541,6 +556,8 @@ contains
          this%s_interface, this%interface_dof_mask, this%bc_s%dof%size())
 
     nullify(s)
+
+    call profiler_end_region('Overset scalar update')
 
   end subroutine overset_interface_update
 
